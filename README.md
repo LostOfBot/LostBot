@@ -1,0 +1,2 @@
+# LostBot
+Discord Bot
