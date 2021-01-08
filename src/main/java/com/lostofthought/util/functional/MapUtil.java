@@ -1,8 +1,10 @@
 package com.lostofthought.util.functional;
 
+import com.lostofthought.lostbot.DisUtil;
 import com.lostofthought.util.Cast;
 import com.lostofthought.util.Exceptional;
 import com.lostofthought.util.Func;
+import discord4j.core.object.entity.User;
 
 import java.util.*;
 
@@ -64,6 +66,18 @@ public class MapUtil {
     });
     return ret;
   }
+  public static <K, V> WrappedMap<K,V> fromPairArray(Pair<K, V>[] a){
+    return fromPairArray(ArrayUtil.asWrapped(a));
+  }
+  public static <K, V> WrappedMap<K,V> fromPairArray(ArrayUtil.WrappedArray<Pair<K, V>> a){
+    return new WrappedMap<>(a.reduce(
+        new HashMap<>(),
+        (acc, p) -> {
+          acc.put(p._1, p._2);
+          return acc;
+        }
+    ));
+  }
   public static <K, V> Func.Func2<Func.Predicate<Pair<K, V>>, Map<K, V>, Map<K, V>> filter(){
     return MapUtil::filter;
   }
@@ -92,6 +106,20 @@ public class MapUtil {
     }
     public Map<K, V> unwrap() {
       return value;
+    }
+
+    @Override
+    public String toString() {
+      return "WrappedMap{" +
+          this.reduce(new StringBuilder(), ((stringBuilder, kvPair) -> {
+            stringBuilder.append("\n");
+            stringBuilder.append(kvPair._1);
+            stringBuilder.append(",");
+            stringBuilder.append(kvPair._2);
+            stringBuilder.append("\n");
+            return stringBuilder;
+          })) +
+          "}";
     }
   }
   public static <K, V> MapUtil.WrappedMap<K, V> asWrapped(Map<K, V> value){

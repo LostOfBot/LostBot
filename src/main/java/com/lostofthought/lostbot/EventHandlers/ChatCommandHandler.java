@@ -78,10 +78,10 @@ public class ChatCommandHandler {
                       DisUtil.OneTimeInvite invite = DisUtil.OneTimeInvite.Gen(currentGuild.fromRight(null));
                       String dmStatus = DisUtil.SendPrivate(m,
                           "You have been banned from: " + currentGuild.fromRight(null).getName() + "\n"
-                          + "Reason: " + reason + "\n"
-                          + "Your message(s) from previous " + deleteMessages + " day(s) have been deleted.\n"
-                          + "Invite link: " + invite + "\n"
-                          + ""
+                              + "Reason: " + reason + "\n"
+                              + "Your message(s) from previous " + deleteMessages + " day(s) have been deleted.\n"
+                              + "Invite link: " + invite + "\n"
+                              + ""
                       ).reduce(
                           e -> {
                             invite.DeleteInvite();
@@ -103,9 +103,72 @@ public class ChatCommandHandler {
                     }
                 ),
                 mentionObjects);
-                }
-            )
+          }
+          )
       );
+    }
+
+    @CommandLine.Command(name = "ban2", description = "Bans users")
+    void ban2(
+        @CommandLine.Option(
+            names = {"-r", "--reason"},
+            defaultValue = "No reason given",
+            description = "Ban reason. Defaults to '${DEFAULT-VALUE}'"
+        )
+            String reason,
+        @CommandLine.Option(
+            names = {"-d", "--delete"},
+            defaultValue = "0",
+            description = "Delete messages from previous <int> days. Defaults to '${DEFAULT-VALUE}'"
+        )
+            int deleteMessages,
+        @CommandLine.Parameters(
+            arity = "1..*",
+            paramLabel = "<@mentions>",
+            description = "Member @mention(s) to be banned"
+        )
+            DisUtil.CLIMember[] mentionObjects
+    ) {
+      requestingMember.reduce(
+          e -> DisUtil.SendMessage(event, "Requesting Member not found, are we in private?"),
+          rm -> {
+            if (!DisUtil.VerifyPermission(rm, Permission.BAN_MEMBERS)) {
+              DisUtil.SendMessage(event, DisUtil.MentionUser(rm) + " Missing permission 'BAN_MEMBERS'");
+              return 1;
+            }
+            DisUtil.ChatUserExceptionMap(event,
+            DisUtil.ForEachMemberBindT(
+                (String s, Member m) -> {
+                      DisUtil.OneTimeInvite invite = DisUtil.OneTimeInvite.Gen(currentGuild.fromRight(null));
+                      boolean pm = DisUtil.SendPrivate(m,
+                          "You have been banned from: " + currentGuild.fromRight(null).getName() + "\n"
+                              + "Reason: " + reason + "\n"
+                              + "Your message(s) from previous " + deleteMessages + " day(s) have been deleted.\n"
+                              + "Invite link: " + invite + "\n"
+                              + ""
+                      ).reduce(
+                          e -> {
+                            invite.DeleteInvite();
+                            return false;
+                          },
+                          p -> true
+                      );
+                      return Exceptional.eitherOfExceptionalV(() -> {
+                        m.ban(
+                            (BanQuerySpec spec) -> {
+                              spec.setReason(reason);
+                              spec.setDeleteMessageDays(deleteMessages);
+                            }
+                        ).block();
+                      }).reduce(
+                          Either::left,
+                          dontcare -> Either.right(DisUtil.EmbedField.of("BANNED" + (pm ? " - PM sent" : ""), DisUtil.MemberAsString(m)))
+                      );
+                    },
+                mentionObjects));
+            return 1;
+          }
+          );
     }
 
     @CommandLine.Command(name = "pardon", description = "Pardons banned users")

@@ -1,5 +1,8 @@
 package com.lostofthought.lostbot;
 
+// After trying to make multiple accounts, usernames cannot contain '@:#'
+// Looks like everything else is fair game. (Note: I did not test control characters, BKSP, ect.)
+
 import com.lostofthought.util.Cast;
 import com.lostofthought.util.Exceptional;
 import com.lostofthought.util.Func;
@@ -18,6 +21,7 @@ import discord4j.core.object.entity.channel.MessageChannel;
 import discord4j.core.object.entity.channel.TextChannel;
 import discord4j.rest.http.client.ClientException;
 import discord4j.rest.json.response.ErrorResponse;
+import discord4j.rest.util.AllowedMentions;
 import discord4j.rest.util.Permission;
 import picocli.CommandLine;
 
@@ -74,6 +78,12 @@ public class DisUtil {
       return Either.left(e);
     }
   }
+  public static String UserAsString(User u){
+    return "@" + u.getUsername() + "#" + u.getDiscriminator() + " `<@" + u.getId().asString() + ">`";
+  }
+  public static String MemberAsString(Member m){
+    return "@" + m.getDisplayName() + "#" + m.getDiscriminator() + " `" + m.getUsername() + "#" + m.getDiscriminator() + " <@" + m.getId().asString() + ">`";
+  }
   public static Either<Exception, Member> MemberFromMention(GatewayDiscordClient gateway, Snowflake guildSnowflake, String mention) {
     return UserFromMention(gateway, mention).bind(u -> Member(guildSnowflake, u));
   }
@@ -112,15 +122,25 @@ public class DisUtil {
   }
 
   public static String ExceptionParser(Exception e){
-    return "Exception - "
-        + Cast.optionOfChecked(e, ClientException.class).reduce(
-        e::getMessage,
+    return Cast.optionOfChecked(e, ClientException.class).reduce(
+        () -> e.getMessage().substring(0, 30) + "...",
         ce -> Optional.ofJava(ce.getErrorResponse()).reduce(
             () -> "Unknown - " + ce.getStatus(),
-            ErrorResponse::toString
+            er -> MapUtil.asWrapped(er.getFields()).reduce(new StringBuilder(), (a, kv) -> {
+              a.append(kv._1);
+              a.append(" - ");
+              a.append(kv._2);
+              a.append("\n");
+              return a;
+            }).toString().trim()
         )
     );
   }
+
+  public static MessageChannel MessageChannelFromEvent(MessageCreateEvent event){
+    return event.getMessage().getChannel().block();
+  }
+
   public static Either<Exception, Message> SendMessage(MessageChannel c, String s) {
     return Exceptional.eitherOfExceptional(() -> c.createMessage(s).block());
   }
@@ -160,28 +180,6 @@ public class DisUtil {
     public static Pair<String, Either<Exception, Member>> asPair(CLIMember o){
       return o;
     }
-  }
-
-  public static String ForEachMember(Func.Func1<Member, Either<Exception, String>> f, CLIMember[] mentionObjects) {
-    return MapUtil.asWrapped(ArrayUtil.asWrapped(mentionObjects).map(CLIMember::asPair).reduce(
-        new HashMap<String, Either<Exception, Member>>(),
-        (acc, p) -> {
-          acc.put(p._1, p._2);
-          return acc;
-        }
-    )).map((pair) -> Pair.from(pair._2.reduce(
-        ex -> pair._1.replace("@", "[at]"),
-        member -> pair._1
-    ), pair._2)).map(
-        (mention, either) -> either.reduce(
-            DisUtil::ExceptionParser,
-            f
-        )
-    ).reduce(new StringBuilder(), (acc, res) -> {
-          acc.append(res._1).append(": ").append(res._2).append("\n");
-          return acc;
-        }
-    ).toString();
   }
 
   public static class OneTimeInvite {
@@ -226,13 +224,7 @@ public class DisUtil {
   }
 
   public static String ForEachUser(Func.Func1<? super User, ? extends Either<Exception, String>> f, CLIUser[] mentionObjects) {
-    return MapUtil.asWrapped(ArrayUtil.asWrapped(mentionObjects).map(CLIUser::asPair).reduce(
-        new HashMap<String, Either<Exception, User>>(),
-        (acc, p) -> {
-          acc.put(p._1, p._2);
-          return acc;
-        }
-    )).map((pair) -> Pair.from(pair._2.reduce(
+    return MapUtil.fromPairArray(mentionObjects).map((pair) -> Pair.from(pair._2.reduce(
         ex -> pair._1.replace("@", "[at]"),
         member -> pair._1
     ), pair._2)).map(
@@ -245,5 +237,97 @@ public class DisUtil {
           return acc;
         }
     ).toString();
+  }
+
+  public static <T> MapUtil.WrappedMap<String /*mention*/, Either<Exception, T>> ForEachUserT(Func.Func2<String, ? super User, ? extends T> f, CLIUser[] mentionObjects) {
+    return MapUtil.fromPairArray(mentionObjects).map(
+        (mentionString, userOrException) -> userOrException.map(
+            f.apply(mentionString)
+        )
+    );
+  }
+
+  public static String ForEachMember(Func.Func1<? super Member, ? extends Either<Exception, String>> f, CLIMember[] mentionObjects) {
+    return MapUtil.fromPairArray(mentionObjects).map((pair) -> Pair.from(pair._2.reduce(
+        ex -> pair._1.replace("@", "[at]"),
+        member -> pair._1
+    ), pair._2)).map(
+        (mention, either) -> either.reduce(
+            DisUtil::ExceptionParser,
+            f
+        )
+    ).reduce(new StringBuilder(), (acc, res) -> {
+          acc.append(res._1).append(": ").append(res._2).append("\n");
+          return acc;
+        }
+    ).toString();
+  }
+
+  public static <T> MapUtil.WrappedMap<String /*mention*/, Either<Exception, T>> ForEachMemberT(Func.Func2<String, Member, T> f, CLIMember[] mentionObjects) {
+    return MapUtil.fromPairArray(mentionObjects).map(
+        (mentionString, userOrException) -> userOrException.map(
+            f.apply(mentionString)
+        )
+    );
+  }
+
+  public static <T> MapUtil.WrappedMap<String /*mention*/, Either<Exception, T>> ForEachMemberBindT(Func.Func2<String, Member, Either<Exception, T>> f, CLIMember[] mentionObjects) {
+    return MapUtil.fromPairArray(mentionObjects).map(
+        (mentionString, userOrException) -> userOrException.bind(
+            f.apply(mentionString)
+        )
+    );
+  }
+
+  public static class EmbedField {
+    public boolean inline = false;
+    public String name = "";
+    public String value = "";
+    public static EmbedField of(String value, String name, boolean inline){
+      EmbedField ef = new EmbedField();
+      ef.value = value;
+      ef.name = name;
+      ef.inline = inline;
+      return ef;
+    }
+    public static EmbedField of(String value, String name){
+      EmbedField ef = new EmbedField();
+      ef.value = value;
+      ef.name = name;
+      return ef;
+    }
+    public static EmbedField of(String value){
+      EmbedField ef = new EmbedField();
+      ef.value = value;
+      return ef;
+    }
+  }
+
+  public static <T> void ChatUserExceptionMap(MessageChannel c, MapUtil.WrappedMap<String, Either<Exception, EmbedField>> m){
+    c.createMessage(ms -> {
+      ms.setEmbed(es -> m.map((mention, eepair) -> eepair.reduce(e -> {
+        EmbedField ef = new EmbedField();
+        ef.name = mention;
+        ef.value = "Exception: \n" + DisUtil.ExceptionParser(e);
+        return ef;
+      }, ef -> ef)).map((dontcare, embed) -> {
+        es.addField(embed.name, embed.value, embed.inline);
+        return 1;
+      }));
+    }).transform(
+        msg -> msg
+    ).block();
+  }
+  public static <T> void ChatMergeUserExceptionMapAutoName(MessageChannel c, MapUtil.WrappedMap<String, Either<Exception, EmbedField>> m){
+    ChatUserExceptionMap(c, m.map((mention, eepair) -> eepair.map(ef -> {
+      ef.name = mention;
+      return ef;
+    })));
+  }
+  public static <T> void ChatUserExceptionMap(MessageCreateEvent e, MapUtil.WrappedMap<String, Either<Exception, EmbedField>> m){
+    ChatUserExceptionMap(DisUtil.MessageChannelFromEvent(e), m);
+  }
+  public static void ChatMergeUserExceptionMapAutoName(MessageCreateEvent e, MapUtil.WrappedMap<String, Either<Exception, EmbedField>> m){
+    ChatMergeUserExceptionMapAutoName(DisUtil.MessageChannelFromEvent(e), m);
   }
 }
